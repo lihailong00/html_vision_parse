@@ -1,0 +1,36 @@
+[project]
+name = "html-vision-parse"
+version = "1.0.0"
+description = "Extract structured content from web screenshots using Qwen3-VL"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.28.0",
+    "Pillow>=10.0.0",
+    "opencv-python>=4.9.0.80",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+    "python-multipart>=0.0.9",
+    "aiofiles>=23.2.1",
+    "pydantic>=2.6.0",
+    "python-dotenv>=1.0.0",
+    "tqdm>=4.66.0",
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+vllm = [
+    "vllm>=0.6.0",
+]
+playwright = [
+    "playwright>=1.40.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []

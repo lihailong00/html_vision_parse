@@ -1,0 +1,82 @@
+# HTML Vision Parse Configuration
+# Copy to config.yaml and modify as needed
+
+model:
+  # Model type: "qwen3_vl" or "internvl3"
+  model_type: "qwen3_vl"
+  # Model path
+  name: "/home/longcoding/dev/models/Qwen3-VL-2B-Instruct"
+  # Device: "cuda" or "cpu"
+  device: "cuda"
+  # Data type: "bfloat16", "float16", "float32"
+  dtype: "bfloat16"
+  # Max batch size for inference
+  max_batch_size: 4
+  # Quantization: "none", "int8", "int4"
+  quantization: "int4"
+  # Inference framework: "transformers" or "vllm"
+  inference_framework: "transformers"
+  # InternVL model path (used when model_type is "internvl3")
+  internvl_model_path: "/home/longcoding/dev/models/InternVL3-1B"
+
+extraction:
+  # Minimum confidence threshold for extraction
+  min_confidence: 0.85
+  # Enable cross-validation between methods
+  enable_cross_validation: false
+  # Max retries on failure
+  max_retries: 2
+  # Extraction timeout in seconds
+  timeout_seconds: 30
+  # Default extraction method: "vl", "ocr", or "hybrid"
+  extraction_method: "vl"
+  # Per-field method override (leave empty to use extraction_method for all)
+  # Example: {"title": "vl", "content": "ocr", "publish_time": "vl"}
+  field_methods: {}
+
+browser:
+  # Browser type: "chromium", "firefox", or "webkit"
+  type: "chromium"
+  # Run browser in headless mode
+  headless: true
+  # Viewport dimensions
+  viewport_width: 1920
+  viewport_height: 1080
+  # Capture full page vs just visible area
+  full_page: true
+  # Wait condition: "load", "domcontentloaded", "networkidle"
+  wait_until: "networkidle"
+  # Page load timeout in ms
+  wait_timeout: 30000
+  # User agent string
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+api:
+  # API server host
+  host: "0.0.0.0"
+  # API server port
+  port: 8000
+  # Number of uvicorn workers
+  workers: 1
+  # Max concurrent requests
+  max_concurrent_requests: 10
+
+ocr:
+  # Enable OCR extraction
+  enabled: true
+  # Minimum confidence for OCR (fallback to VL below this)
+  min_confidence: 0.75
+  # Use EasyOCR (true) vs PaddleOCR (false)
+  use_easyocr: true
+  # Fallback to VL when OCR confidence is low
+  fallback_to_vl: true
+  # OCR timeout in seconds
+  ocr_timeout_seconds: 10
+
+batch:
+  # Batch size for processing
+  batch_size: 4
+  # Number of worker processes
+  num_workers: 4
+  # Prefetch factor for data loading
+  prefetch_factor: 2
