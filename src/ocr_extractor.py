@@ -5,12 +5,12 @@ import time
 from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict, Any
 from PIL import Image
-import structlog
+from loguru import logger
 
 from .inference import InferenceEngine
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 @dataclass

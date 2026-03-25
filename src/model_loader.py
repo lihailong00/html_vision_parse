@@ -3,11 +3,11 @@
 import torch
 from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 from typing import Optional
-import structlog
+from loguru import logger
 
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class ModelLoader:

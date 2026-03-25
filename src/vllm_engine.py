@@ -4,9 +4,9 @@ from typing import List, Dict, Any, Union, Optional
 from PIL import Image
 import io
 import base64
-import structlog
+from loguru import logger
 
-logger = structlog.get_logger()
+
 
 # Check if vllm is available
 try:

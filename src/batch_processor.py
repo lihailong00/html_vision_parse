@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 from typing import List, Optional, Callable, Any
 from concurrent.futures import ThreadPoolExecutor
-import structlog
+from loguru import logger
 from PIL import Image
 from tqdm import tqdm
 
@@ -15,7 +15,7 @@ from .vllm_engine import VLLMEngine
 from .extractor import ContentExtractor, ExtractionResult
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class BatchProcessor:

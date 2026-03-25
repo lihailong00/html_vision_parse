@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional, List, Literal
 from contextlib import asynccontextmanager
 
-import structlog
+from loguru import logger
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -21,7 +21,7 @@ from .pipeline import WebPagePipeline
 from .html_renderer import HTMLRenderer
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 # Global pipeline instances (lazy loaded)
 _pipeline: Optional[WebPagePipeline] = None

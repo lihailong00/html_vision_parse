@@ -4,7 +4,7 @@ import json
 import re
 from typing import Optional, Dict, Any, List, Literal
 from PIL import Image
-import structlog
+from loguru import logger
 
 from .inference import InferenceEngine
 from .ocr_extractor import OCRExtractor
@@ -12,7 +12,7 @@ from .extractor import ExtractionResult
 from prompts.extraction_prompt import get_extraction_prompt
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class FlexibleExtractor:

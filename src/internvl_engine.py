@@ -5,12 +5,12 @@ from typing import List, Optional, Tuple
 import numpy as np
 import torch
 from PIL import Image
-import structlog
+from loguru import logger
 from transformers import AutoModelForCausalLM, AutoConfig, AutoTokenizer, GenerationConfig
 
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class InternVLEngine:

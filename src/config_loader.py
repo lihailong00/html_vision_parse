@@ -4,11 +4,11 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any, Literal
 import yaml
-import structlog
+from loguru import logger
 
 from config.settings import settings, Settings
 
-logger = structlog.get_logger()
+
 
 
 class ConfigLoader:

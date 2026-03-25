@@ -4,13 +4,13 @@ import asyncio
 from typing import Optional, Union, List
 from pathlib import Path
 
-import structlog
+from loguru import logger
 from PIL import Image
 
 from .browser import BrowserContext
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class ScreenshotCapture:

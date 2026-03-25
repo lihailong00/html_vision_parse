@@ -6,12 +6,12 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional, Union
 from PIL import Image
-import structlog
+from loguru import logger
 
 from .browser import BrowserContext
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class HTMLRenderer:

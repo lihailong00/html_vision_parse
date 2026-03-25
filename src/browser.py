@@ -4,11 +4,11 @@ import asyncio
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 
-import structlog
+from loguru import logger
 
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 # Check if playwright is available
 try:

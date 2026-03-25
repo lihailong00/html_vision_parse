@@ -1,7 +1,7 @@
 """Pipeline integrating browser, screenshot, and extraction."""
 
 from typing import Optional, Dict, Any, List, Literal
-import structlog
+from loguru import logger
 
 from .browser import BrowserContext
 from .screenshot import ScreenshotCapture
@@ -13,7 +13,7 @@ from .ocr_extractor import OCRExtractor
 from .flexible_extractor import FlexibleExtractor
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class WebPagePipeline:

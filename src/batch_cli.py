@@ -7,13 +7,13 @@ import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import argparse
-import structlog
+from loguru import logger
 
 from .pipeline import WebPagePipeline
 from .html_renderer import HTMLRenderer
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class BatchCLI:

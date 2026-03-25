@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Callable
 from pathlib import Path
 
-import structlog
+from loguru import logger
 from PIL import Image
 
 # Add parent to path for imports
@@ -32,7 +32,7 @@ from src.inference import InferenceEngine
 from src.extractor import ContentExtractor, ExtractionResult
 from src.ocr_extractor import OCRExtractor
 
-logger = structlog.get_logger()
+
 
 
 @dataclass

@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from PIL import Image
-import structlog
+from loguru import logger
 
 from .inference import InferenceEngine
 from prompts.extraction_prompt import (
@@ -15,7 +15,7 @@ from prompts.extraction_prompt import (
 )
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class ExtractionResult:

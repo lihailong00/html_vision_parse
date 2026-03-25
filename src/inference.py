@@ -3,13 +3,13 @@
 import torch
 from PIL import Image
 from typing import Union, List, Dict, Any, Optional
-import structlog
+from loguru import logger
 import json
 
 from .model_loader import ModelLoader
 from config.settings import settings
 
-logger = structlog.get_logger()
+
 
 
 class InferenceEngine:
