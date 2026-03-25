@@ -1,22 +1,6 @@
 #!/usr/bin/env python3
 """
-Multi-GPU API server launcher.
-
-Usage:
-    # Single GPU
-    python start_api.py
-
-    # Use specific GPUs (2 GPUs)
-    python start_api.py --gpus 0 1
-
-    # Use specific GPUs with workers (4 GPUs, 4 workers)
-    python start_api.py --gpus 0 1 2 3 --workers 4
-
-    # Use OCR method (faster, no VL model)
-    python start_api.py --method ocr
-
-    # Use specific GPU only
-    python start_api.py --gpus 2 --method ocr
+Multi-GPU API server launcher with Typer.
 """
 
 import argparse
@@ -26,52 +10,15 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional, List, Annotated
+import typer
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.pipeline import get_available_gpus
 
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Start API server with multi-GPU support")
-
-    parser.add_argument(
-        "--gpus", "-g",
-        nargs="+",
-        type=int,
-        default=None,
-        help="GPU IDs to use. Default: all available GPUs"
-    )
-
-    parser.add_argument(
-        "--workers", "-w",
-        type=int,
-        default=None,
-        help="Number of workers. Default: number of GPUs"
-    )
-
-    parser.add_argument(
-        "--method",
-        choices=["vl", "ocr"],
-        default=None,
-        help="Extraction method: vl or ocr"
-    )
-
-    parser.add_argument(
-        "--port", "-p",
-        type=int,
-        default=8000,
-        help="Starting port (default: 8000)"
-    )
-
-    parser.add_argument(
-        "--host",
-        default="0.0.0.0",
-        help="Host to bind (default: 0.0.0.0)"
-    )
-
-    return parser.parse_args()
+app = typer.Typer(help="Start API server with multi-GPU support", add_completion=False)
 
 
 def get_gpu_memory_info(gpu_id: int) -> str:
@@ -86,49 +33,77 @@ def get_gpu_memory_info(gpu_id: int) -> str:
     return "unknown"
 
 
-def main():
-    args = parse_args()
+@app.command()
+def main(
+    gpus: Annotated[
+        Optional[List[int]],
+        typer.Option("-g", "--gpus", help="GPU IDs to use. Default: all available GPUs")
+    ] = None,
+    workers: Annotated[
+        Optional[int],
+        typer.Option("-w", "--workers", help="Number of workers. Default: number of GPUs")
+    ] = None,
+    method: Annotated[
+        Optional[str],
+        typer.Option(help="Extraction method: vl or ocr")
+    ] = None,
+    port: Annotated[
+        int,
+        typer.Option("-p", "--port", help="Starting port (default: 8000)")
+    ] = 8000,
+    host: Annotated[
+        str,
+        typer.Option(help="Host to bind (default: 0.0.0.0)")
+    ] = "0.0.0.0",
+):
+    """
+    Start API server with multi-GPU support.
 
+    Examples:
+        python start_api.py
+        python start_api.py --gpus 0 1 2 3
+        python start_api.py --gpus 0 1 --workers 2 --method ocr
+    """
     # Determine GPUs to use
-    if args.gpus is not None:
-        gpus = args.gpus
+    if gpus is not None:
+        available_gpus = gpus
     else:
-        gpus = get_available_gpus()
+        available_gpus = get_available_gpus()
 
-    if not gpus:
-        print("No GPUs available! Running on CPU (will be slow)")
-        gpus = [-1]
+    if not available_gpus:
+        typer.echo("No GPUs available! Running on CPU (will be slow)")
+        available_gpus = [-1]
     else:
-        print(f"GPUs to use: {gpus}")
+        typer.echo(f"GPUs to use: {available_gpus}")
 
     # Determine number of workers
-    num_workers = args.workers or len(gpus)
-    print(f"Number of workers: {num_workers}")
+    num_workers = workers or len(available_gpus)
+    typer.echo(f"Number of workers: {num_workers}")
 
     # Determine extraction method
-    method = args.method or "vl"
-    print(f"Extraction method: {method}")
-
-    # Build environment
-    env = os.environ.copy()
+    extraction_method = method or "vl"
+    typer.echo(f"Extraction method: {extraction_method}")
 
     # Print GPU info
-    for i, gpu_id in enumerate(gpus[:num_workers]):
+    for i in range(min(num_workers, len(available_gpus))):
+        gpu_id = available_gpus[i % len(available_gpus)]
         if gpu_id >= 0:
             mem = get_gpu_memory_info(gpu_id)
-            print(f"  Worker {i}: GPU {gpu_id} ({mem})")
+            typer.echo(f"  Worker {i}: GPU {gpu_id} ({mem})")
+        else:
+            typer.echo(f"  Worker {i}: CPU")
 
-    print(f"\nStarting {num_workers} worker(s) on ports {args.port} - {args.port + num_workers - 1}...")
+    typer.echo(f"\nStarting {num_workers} worker(s) on ports {port} - {port + num_workers - 1}...")
 
     processes = []
 
     try:
         for worker_id in range(num_workers):
-            gpu_id = gpus[worker_id % len(gpus)]
-            port = args.port + worker_id
+            gpu_id = available_gpus[worker_id % len(available_gpus)]
+            worker_port = port + worker_id
 
             # Set environment for this worker
-            worker_env = env.copy()
+            worker_env = os.environ.copy()
             worker_env["WORKER_ID"] = str(worker_id)
 
             if gpu_id >= 0:
@@ -140,13 +115,12 @@ def main():
             cmd = [
                 sys.executable, "-m", "uvicorn",
                 "src.api:app",
-                "--host", args.host,
-                "--port", str(port),
+                "--host", host,
+                "--port", str(worker_port),
                 "--workers", "1",
             ]
 
-            print(f"Starting worker {worker_id}: GPU {gpu_id}, port {port}")
-            print(f"  Command: {' '.join(cmd)}")
+            typer.echo(f"Starting worker {worker_id}: GPU {gpu_id}, port {worker_port}")
 
             proc = subprocess.Popen(
                 cmd,
@@ -154,44 +128,43 @@ def main():
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
-            processes.append((worker_id, gpu_id, port, proc))
+            processes.append((worker_id, gpu_id, worker_port, proc))
 
-            # Small delay between starts
             time.sleep(1)
 
-        print("\n" + "=" * 60)
-        print("API Server Started")
-        print("=" * 60)
-        print(f"Workers: {num_workers}")
-        print(f"GPUs: {gpus[:num_workers]}")
-        print(f"Method: {method}")
-        print(f"Base URL: http://{args.host}:{args.port}")
-        print(f"API Docs: http://{args.host}:{args.port}/docs")
-        print("\nPress Ctrl+C to stop all workers")
-        print("=" * 60)
+        typer.echo("\n" + "=" * 60)
+        typer.echo("API Server Started")
+        typer.echo("=" * 60)
+        typer.echo(f"Workers: {num_workers}")
+        typer.echo(f"GPUs: {available_gpus[:num_workers]}")
+        typer.echo(f"Method: {extraction_method}")
+        typer.echo(f"Base URL: http://{host}:{port}")
+        typer.echo(f"API Docs: http://{host}:{port}/docs")
+        typer.echo("\nPress Ctrl+C to stop all workers")
+        typer.echo("=" * 60)
 
         # Wait for processes
-        for worker_id, gpu_id, port, proc in processes:
+        for worker_id, gpu_id, worker_port, proc in processes:
             proc.wait()
 
     except KeyboardInterrupt:
-        print("\nStopping all workers...")
-        for worker_id, gpu_id, port, proc in processes:
-            print(f"Stopping worker {worker_id} (GPU {gpu_id}, port {port})...")
+        typer.echo("\nStopping all workers...")
+        for worker_id, gpu_id, worker_port, proc in processes:
+            typer.echo(f"Stopping worker {worker_id} (GPU {gpu_id}, port {worker_port})...")
             proc.terminate()
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
 
-        print("All workers stopped.")
+        typer.echo("All workers stopped.")
 
     except Exception as e:
-        print(f"Error: {e}")
-        for worker_id, gpu_id, port, proc in processes:
+        typer.echo(f"Error: {e}")
+        for worker_id, gpu_id, worker_port, proc in processes:
             proc.terminate()
-        sys.exit(1)
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    app()

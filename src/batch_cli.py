@@ -2,18 +2,104 @@
 
 import asyncio
 import json
-import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-import argparse
-from loguru import logger
+from typing import Optional, List, Dict, Any, Annotated
+import typer
 
-from .pipeline import WebPagePipeline, get_available_gpus
-from .html_renderer import HTMLRenderer
+from src.pipeline import WebPagePipeline, get_available_gpus
+from src.html_renderer import HTMLRenderer
 from config.settings import settings
 
+app = typer.Typer(help="Batch process URLs or HTML sources for content extraction")
+
+
+@app.command()
+def main(
+    input: Annotated[str, typer.Argument(help="Input JSONL file path")],
+    output: Annotated[str, typer.Argument(help="Output JSONL file path")],
+    fields: Annotated[str, typer.Option("-f", "--fields", help="Comma-separated fields to extract")] = None,
+    methods: Annotated[str, typer.Option("-m", "--methods", help="JSON dict for per-field methods")] = None,
+    max_items: Annotated[int, typer.Option("-n", "--max-items", help="Maximum number of items to process")] = None,
+    gpu_id: Annotated[int, typer.Option("-g", "--gpu-id", help="GPU device ID to use")] = None,
+    method: Annotated[str, typer.Option(help="Extraction method: vl or ocr")] = None,
+):
+    """
+    Batch process URLs or HTML sources from JSONL file.
+
+    Input JSONL format:
+        {"url": "https://example.com/article1"}
+        {"html_source": "<html>...</html>", "url": "optional-identifier"}
+
+    Examples:
+        python -m src.batch_cli input.jsonl results.jsonl
+        python -m src.batch_cli input.jsonl out.jsonl --gpu-id 1 --method ocr
+        python -m src.batch_cli input.jsonl out.jsonl --fields title,content
+    """
+
+    # Parse fields
+    field_list: Optional[List[str]] = None
+    if fields:
+        field_list = [f.strip() for f in fields.split(',')]
+
+    # Parse methods
+    method_dict: Optional[Dict[str, str]] = None
+    if methods:
+        try:
+            method_dict = json.loads(methods)
+        except json.JSONDecodeError as e:
+            typer.echo(f"Error: Invalid methods JSON: {e}", err=True)
+            raise typer.Exit(1)
+
+    # Validate method
+    if method and method not in ["vl", "ocr"]:
+        typer.echo(f"Error: method must be 'vl' or 'ocr', got '{method}'", err=True)
+        raise typer.Exit(1)
+
+    # Show GPU info
+    available_gpus = get_available_gpus()
+    typer.echo(f"Available GPUs: {available_gpus}")
+
+    # Show config
+    extraction_method = method or settings.extraction.extraction_method
+    typer.echo(f"Extraction method: {extraction_method}")
+    typer.echo(f"GPU ID: {gpu_id if gpu_id is not None else 'auto'}")
+
+    # Run batch processing
+    cli = BatchCLI(gpu_id=gpu_id, extraction_method=extraction_method)
+
+    try:
+        stats = asyncio.run(cli.process_jsonl(
+            input_path=input,
+            output_path=output,
+            fields=field_list,
+            methods=method_dict,
+            max_items=max_items,
+        ))
+
+        typer.echo("\n" + "=" * 50)
+        typer.echo("Batch Processing Complete")
+        typer.echo("=" * 50)
+        typer.echo(f"Total:          {stats['total']}")
+        typer.echo(f"Success:        {stats['success']}")
+        typer.echo(f"Failed:         {stats['failed']}")
+        typer.echo(f"Skipped:        {stats['skipped']}")
+        typer.echo(f"Time:           {stats['total_time_seconds']:.1f}s")
+        typer.echo(f"GPU ID:         {stats['gpu_id']}")
+        typer.echo(f"Method:         {stats['extraction_method']}")
+        if stats['total_time_seconds'] > 0:
+            rate = stats['total'] / stats['total_time_seconds']
+            typer.echo(f"Rate:           {rate:.1f} items/sec")
+        typer.echo(f"Output:         {output}")
+        typer.echo("=" * 50)
+
+    except KeyboardInterrupt:
+        typer.echo("\nInterrupted by user", err=True)
+        raise typer.Exit(130)
+    except Exception as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
 
 
 class BatchCLI:
@@ -25,20 +111,7 @@ class BatchCLI:
         {"html_source": "<html>...</html>", "url": "optional-identifier"}
 
     Output JSONL format:
-        {"url": "https://example.com/article1", "title": "...", "content": "...", "publish_time": "...", "success": true}
-
-    Usage:
-        # Process URLs from input.jsonl
-        python -m src.batch_cli --input input.jsonl --output results.jsonl
-
-        # Use specific GPU
-        python -m src.batch_cli --input input.jsonl --output results.jsonl --gpu-id 1
-
-        # Use OCR method (no VL model needed, faster)
-        python -m src.batch_cli --input input.jsonl --output results.jsonl --method ocr
-
-        # Per-field method selection
-        python -m src.batch_cli --input input.jsonl --output results.jsonl --fields title,content --methods '{"title": "vl", "content": "ocr"}'
+        {"url": "...", "title": "...", "content": "...", "success": true}
     """
 
     def __init__(
@@ -46,26 +119,10 @@ class BatchCLI:
         gpu_id: int = None,
         extraction_method: str = None,
     ):
-        """
-        Initialize batch CLI.
-
-        Args:
-            gpu_id: GPU device ID to use. None = auto-select.
-            extraction_method: "vl" or "ocr". None = use settings default.
-        """
         self._gpu_id = gpu_id
         self._extraction_method = extraction_method or settings.extraction.extraction_method
         self._pipeline: Optional[WebPagePipeline] = None
         self._html_renderer: Optional[HTMLRenderer] = None
-
-        # Show GPU info
-        available = get_available_gpus()
-        if self._gpu_id is not None:
-            if self._gpu_id not in available:
-                logger.warning("gpu_id_not_in_available", gpu_id=self._gpu_id, available=available)
-            logger.info("using_specific_gpu", gpu_id=self._gpu_id, available_gpus=available)
-        else:
-            logger.info("auto_selecting_gpu", available_gpus=available, method=self._extraction_method)
 
     def _ensure_pipeline(self):
         """Ensure pipeline is initialized."""
@@ -90,19 +147,7 @@ class BatchCLI:
         methods: Optional[Dict[str, str]] = None,
         max_items: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """
-        Process a JSONL file and write results to output file.
-
-        Args:
-            input_path: Path to input JSONL file
-            output_path: Path to output JSONL file
-            fields: List of fields to extract
-            methods: Dict mapping field -> method
-            max_items: Maximum number of items to process (None = all)
-
-        Returns:
-            Statistics dict with processing results
-        """
+        """Process a JSONL file and write results to output file."""
         input_file = Path(input_path)
         if not input_file.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
@@ -111,7 +156,6 @@ class BatchCLI:
         pipeline = self._ensure_pipeline()
         renderer = self._ensure_html_renderer()
 
-        # Stats tracking
         stats = {
             "total": 0,
             "success": 0,
@@ -124,31 +168,22 @@ class BatchCLI:
 
         start_time = time.time()
 
-        logger.info("processing_jsonl",
-            input=input_path,
-            output=output_path,
-            max_items=max_items,
-            gpu_id=self._gpu_id,
-            method=self._extraction_method,
-        )
+        typer.echo(f"Processing: {input_path} -> {output_path}")
 
         with open(input_file, 'r', encoding='utf-8') as fin, \
              open(output_file, 'w', encoding='utf-8') as fout:
 
             for line_num, line in enumerate(fin):
                 if max_items and line_num >= max_items:
-                    logger.info("max_items_reached", count=max_items)
+                    typer.echo(f"Max items reached: {max_items}")
                     break
 
                 stats["total"] += 1
 
                 try:
-                    # Parse input line
                     record = json.loads(line.strip())
 
-                    # Determine if URL or HTML source
                     if "url" in record and "html_source" not in record:
-                        # URL-based extraction
                         url = record["url"]
                         identifier = record.get("identifier", url)
 
@@ -170,15 +205,12 @@ class BatchCLI:
                         }
 
                     elif "html_source" in record:
-                        # HTML source extraction
                         html_content = record["html_source"]
                         identifier = record.get("identifier", record.get("url", f"line_{line_num}"))
                         url = record.get("url")
 
-                        # Render HTML to image
                         image = await renderer.render_from_html(html_content)
 
-                        # Extract
                         if self._extraction_method == "ocr" and methods is None:
                             result = pipeline._extract_with_ocr(image, url)
                         else:
@@ -203,8 +235,7 @@ class BatchCLI:
                         }
 
                     else:
-                        # No url or html_source - skip
-                        logger.warning("skipping_record_no_source", line=line_num + 1)
+                        typer.echo(f"Warning: Skipping line {line_num + 1} - no url or html_source")
                         output_record = {
                             "line": line_num + 1,
                             "success": False,
@@ -219,20 +250,13 @@ class BatchCLI:
                     else:
                         stats["failed"] += 1
 
-                    # Progress logging every 100 items
                     if stats["total"] % 100 == 0:
                         elapsed = time.time() - start_time
                         rate = stats["total"] / elapsed if elapsed > 0 else 0
-                        logger.info(
-                            "batch_progress",
-                            processed=stats["total"],
-                            success=stats["success"],
-                            failed=stats["failed"],
-                            rate=f"{rate:.1f} items/sec",
-                        )
+                        typer.echo(f"Progress: {stats['total']} processed, {stats['success']} success, {stats['failed']} failed, {rate:.1f} items/sec")
 
                 except json.JSONDecodeError as e:
-                    logger.error("json_parse_failed", line=line_num + 1, error=str(e))
+                    typer.echo(f"Error: JSON parse failed at line {line_num + 1}: {e}")
                     output_record = {
                         "line": line_num + 1,
                         "success": False,
@@ -242,7 +266,7 @@ class BatchCLI:
                     stats["failed"] += 1
 
                 except Exception as e:
-                    logger.error("processing_failed", line=line_num + 1, error=str(e))
+                    typer.echo(f"Error: Processing failed at line {line_num + 1}: {e}")
                     output_record = {
                         "line": line_num + 1,
                         "success": False,
@@ -255,141 +279,11 @@ class BatchCLI:
 
         return stats
 
-    def process_jsonl_sync(
-        self,
-        input_path: str,
-        output_path: str,
-        fields: Optional[List[str]] = None,
-        methods: Optional[Dict[str, str]] = None,
-        max_items: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Synchronous wrapper for process_jsonl."""
-        return asyncio.run(self.process_jsonl(
-            input_path=input_path,
-            output_path=output_path,
-            fields=fields,
-            methods=methods,
-            max_items=max_items,
-        ))
-
     def __del__(self):
         """Cleanup on deletion."""
         if self._pipeline is not None:
             self._pipeline._release_model()
 
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Batch process URLs or HTML sources for content extraction"
-    )
-
-    parser.add_argument(
-        "--input", "-i",
-        required=True,
-        help="Input JSONL file path"
-    )
-
-    parser.add_argument(
-        "--output", "-o",
-        required=True,
-        help="Output JSONL file path"
-    )
-
-    parser.add_argument(
-        "--fields", "-f",
-        help="Comma-separated fields to extract (default: all)"
-    )
-
-    parser.add_argument(
-        "--methods", "-m",
-        help="JSON dict for per-field methods, e.g. '{\"title\": \"vl\", \"content\": \"ocr\"}'"
-    )
-
-    parser.add_argument(
-        "--max-items", "-n",
-        type=int,
-        default=None,
-        help="Maximum number of items to process"
-    )
-
-    parser.add_argument(
-        "--gpu-id", "-g",
-        type=int,
-        default=None,
-        help="GPU device ID to use (default: auto-select)"
-    )
-
-    parser.add_argument(
-        "--method",
-        choices=["vl", "ocr"],
-        default=None,
-        help="Extraction method: vl (vision language) or ocr (default: from config)"
-    )
-
-    return parser.parse_args()
-
-
-def main():
-    """Main entry point for batch CLI."""
-    args = parse_args()
-
-    # Parse fields
-    fields = None
-    if args.fields:
-        fields = [f.strip() for f in args.fields.split(',')]
-
-    # Parse methods
-    methods = None
-    if args.methods:
-        try:
-            methods = json.loads(args.methods)
-        except json.JSONDecodeError as e:
-            print(f"Error: Invalid methods JSON: {e}", file=sys.stderr)
-            sys.exit(1)
-
-    # Show GPU info
-    available_gpus = get_available_gpus()
-    print(f"Available GPUs: {available_gpus}")
-
-    # Run batch processing
-    cli = BatchCLI(
-        gpu_id=args.gpu_id,
-        extraction_method=args.method,
-    )
-
-    try:
-        stats = cli.process_jsonl(
-            input_path=args.input,
-            output_path=args.output,
-            fields=fields,
-            methods=methods,
-            max_items=args.max_items,
-        )
-
-        print("\n" + "=" * 50)
-        print("Batch Processing Complete")
-        print("=" * 50)
-        print(f"Total:          {stats['total']}")
-        print(f"Success:        {stats['success']}")
-        print(f"Failed:         {stats['failed']}")
-        print(f"Skipped:        {stats['skipped']}")
-        print(f"Time:           {stats['total_time_seconds']:.1f}s")
-        print(f"GPU ID:         {stats['gpu_id']}")
-        print(f"Method:         {stats['extraction_method']}")
-        if stats['total_time_seconds'] > 0:
-            rate = stats['total'] / stats['total_time_seconds']
-            print(f"Rate:           {rate:.1f} items/sec")
-        print(f"Output:         {args.output}")
-        print("=" * 50)
-
-    except KeyboardInterrupt:
-        print("\nInterrupted by user", file=sys.stderr)
-        sys.exit(130)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
 if __name__ == "__main__":
-    main()
+    app()
