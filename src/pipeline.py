@@ -1,5 +1,6 @@
 """Pipeline integrating browser, screenshot, and extraction."""
 
+import os
 from typing import Optional, Dict, Any, List, Literal
 from loguru import logger
 
@@ -14,6 +15,30 @@ from .flexible_extractor import FlexibleExtractor
 from config.settings import settings
 
 
+def get_available_gpus() -> List[int]:
+    """Get list of available GPU device IDs."""
+    if settings.gpu.visible_devices:
+        return settings.gpu.visible_devices
+
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return list(range(torch.cuda.device_count()))
+    except Exception:
+        pass
+
+    return [0]  # Default to GPU 0
+
+
+def set_gpu_device(device_id: int):
+    """Set the current process to use a specific GPU."""
+    try:
+        import torch
+        if torch.cuda.is_available() and device_id < torch.cuda.device_count():
+            torch.cuda.set_device(device_id)
+            logger.info("gpu_assigned", device_id=device_id, device_name=torch.cuda.get_device_name(device_id))
+    except Exception as e:
+        logger.warning("failed_to_set_gpu", device_id=device_id, error=str(e))
 
 
 class WebPagePipeline:
@@ -25,50 +50,91 @@ class WebPagePipeline:
         result = await pipeline.run("https://example.com/article")
         print(result.title, result.content, result.publish_time)
 
-    Flexible extraction:
-        # Extract only specific fields with specified methods
-        result = await pipeline.extract_from_url(
-            "https://example.com",
-            fields=["title", "publish_time"],
-            methods={"title": "vl", "publish_time": "ocr"}
-        )
+    GPU Selection:
+        # By default, uses first available GPU (or GPU 0)
+        pipeline = WebPagePipeline(gpu_id=1)  # Use GPU 1
 
-        # Use hybrid extraction (OCR for content, VL for title/time)
+    Extraction Methods:
+        # Use OCR for all fields
+        pipeline = WebPagePipeline(extraction_method="ocr")
+
+        # Use VL for all fields
+        pipeline = WebPagePipeline(extraction_method="vl")
+
+        # Per-field method selection
         result = await pipeline.extract_from_url(
             "https://example.com",
-            use_hybrid=True
+            fields=["title", "content"],
+            methods={"title": "vl", "content": "ocr"}
         )
     """
 
-    def __init__(self, use_hybrid: bool = True):
+    def __init__(
+        self,
+        gpu_id: int = None,
+        extraction_method: Literal["vl", "ocr"] = None,
+    ):
+        """
+        Initialize pipeline.
+
+        Args:
+            gpu_id: GPU device ID to use. None = auto-select based on worker ID.
+            extraction_method: "vl" or "ocr". None = use settings default.
+        """
         self._screenshot = ScreenshotCapture()
         self._model_loader = None
         self._vllm_engine = None
         self._engine = None
         self._extractor = None
-        self._flexible_extractor = None
         self._ocr_extractor = None
-        self._use_hybrid = use_hybrid and settings.ocr.enabled
+        self._flexible_extractor = None
+
+        # GPU assignment
+        available_gpus = get_available_gpus()
+        if gpu_id is None:
+            # Default: use first available GPU
+            self._gpu_id = available_gpus[0] if available_gpus else 0
+        else:
+            if gpu_id not in available_gpus:
+                logger.warning("gpu_id_not_available", requested=gpu_id, available=available_gpus)
+                self._gpu_id = available_gpus[0] if available_gpus else 0
+            else:
+                self._gpu_id = gpu_id
+
+        # Extraction method
+        self._extraction_method = extraction_method or settings.extraction.extraction_method
+
+        # Initialize extractors
+        self._init_ocr_extractor()
+
+    def _init_ocr_extractor(self):
+        """Initialize OCR extractor (always available)."""
+        self._ocr_extractor = OCRExtractor(inference_engine=None)
 
     def _ensure_model_loaded(self):
-        """Lazy load the model based on inference framework setting."""
-        if self._engine is None:
-            if settings.model.inference_framework == "vllm":
-                self._vllm_engine = VLLMEngine(settings.model.name)
-                self._vllm_engine.load()
-                self._engine = self._vllm_engine
-            else:
-                self._model_loader = ModelLoader()
-                self._model_loader.load()
-                self._engine = InferenceEngine(self._model_loader)
-            self._extractor = ContentExtractor(self._engine)
-            # Initialize OCR extractor with VL engine for fallback
-            if self._use_hybrid:
-                self._ocr_extractor = OCRExtractor(inference_engine=self._engine)
-                self._flexible_extractor = FlexibleExtractor(
-                    ocr_extractor=self._ocr_extractor,
-                    vl_engine=self._engine
-                )
+        """Lazy load the VL model if needed."""
+        if self._engine is not None:
+            return
+
+        # Set GPU before loading model
+        set_gpu_device(self._gpu_id)
+
+        if settings.model.inference_framework == "vllm":
+            self._vllm_engine = VLLMEngine(settings.model.name)
+            self._vllm_engine.load()
+            self._engine = self._vllm_engine
+        else:
+            self._model_loader = ModelLoader()
+            self._model_loader.load()
+            self._engine = InferenceEngine(self._model_loader)
+
+        self._extractor = ContentExtractor(self._engine)
+        self._flexible_extractor = FlexibleExtractor(
+            ocr_extractor=self._ocr_extractor,
+            vl_engine=self._engine
+        )
+
+        logger.info("model_loaded", gpu_id=self._gpu_id, method=self._extraction_method)
 
     def _release_model(self):
         """Release model resources."""
@@ -80,9 +146,18 @@ class WebPagePipeline:
             if self._model_loader:
                 self._model_loader.unload()
                 self._model_loader = None
+
         self._engine = None
         self._extractor = None
-        self._ocr_extractor = None
+        self._flexible_extractor = None
+
+        # Clear GPU cache
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     async def screenshot_only(self, url: str, save_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -109,7 +184,6 @@ class WebPagePipeline:
     async def extract_from_url(
         self,
         url: str,
-        use_hybrid: bool = None,
         fields: List[str] = None,
         methods: Dict[str, Literal["vl", "ocr"]] = None,
     ) -> ExtractionResult:
@@ -118,85 +192,62 @@ class WebPagePipeline:
 
         Args:
             url: Target URL
-            use_hybrid: Override hybrid mode (None = use pipeline default)
             fields: List of fields to extract ["title", "content", "publish_time"]
                    If None, extracts all fields.
             methods: Dict mapping field -> method {"vl" or "ocr"}
-                   If None, uses settings.extraction.field_methods
+                   If None, uses settings.extraction.field_methods or extraction_method
 
         Returns:
             ExtractionResult with title, content, publish_time
         """
-        logger.info("extracting_from_url", url=url, fields=fields, methods=methods)
-
-        # Ensure model is loaded
-        self._ensure_model_loaded()
+        logger.info("extracting_from_url", url=url, fields=fields, methods=methods, gpu_id=self._gpu_id)
 
         # Capture screenshot
         image = await self._screenshot.capture(url)
 
-        # Use flexible extraction if methods specified or fields specified
-        if methods is not None or fields is not None:
+        # If OCR method specified, use OCR directly (no VL model needed)
+        if self._extraction_method == "ocr" and methods is None:
+            return self._extract_with_ocr(image, url)
+
+        # If VL method or custom methods, need VL model
+        if methods is not None:
+            # Check if any method is VL
+            use_vl = any(m == "vl" for m in methods.values())
+        else:
+            use_vl = self._extraction_method == "vl"
+
+        if use_vl:
+            self._ensure_model_loaded()
             result = self._flexible_extractor.extract_fields(
                 image, fields=fields, methods=methods
             )
             result.source_url = url
+            result.extraction_method = methods.get("content", self._extraction_method) if methods else self._extraction_method
             return result
 
-        # Use hybrid OCR+VL extraction if enabled
-        should_use_hybrid = use_hybrid if use_hybrid is not None else self._use_hybrid
+        # Pure OCR
+        return self._extract_with_ocr(image, url)
 
-        if should_use_hybrid and self._ocr_extractor is not None:
-            # Try OCR first, fallback to VL if confidence is low
-            ocr_result, used_vl = self._ocr_extractor.extract_with_fallback(
-                image,
-                min_confidence=settings.ocr.min_confidence
-            )
+    def _extract_with_ocr(self, image, url: str) -> ExtractionResult:
+        """Extract using OCR only (no VL model)."""
+        ocr_result = self._ocr_extractor.extract_ocr(image)
 
-            if not used_vl:
-                # OCR succeeded - convert OCRResult to ExtractionResult
-                result = ExtractionResult(
-                    title=self._ocr_extractor.extract_title(
-                        ocr_result.blocks, image.height
-                    ),
-                    content=ocr_result.full_text,
-                    publish_time=self._ocr_extractor.extract_time(
-                        ocr_result.blocks
-                    ),
-                    confidence=ocr_result.confidence,
-                    extraction_method="ocr",
-                )
-                logger.info(
-                    "ocr_extraction_done",
-                    confidence=result.confidence,
-                    title=result.title[:50] if result.title else None,
-                )
-                result.source_url = url
-                return result
-            else:
-                # VL fallback was used
-                result = self._extractor.extract(image)
-                result.extraction_method = "vl"
-                result.source_url = url
-                logger.info(
-                    "vl_fallback_extraction_done",
-                    confidence=result.confidence,
-                    title=result.title[:50] if result.title else None,
-                )
-                return result
-        else:
-            # Pure VL extraction
-            result = self._extractor.extract(image)
-            result.extraction_method = "vl"
-            result.source_url = url
+        result = ExtractionResult(
+            title=self._ocr_extractor.extract_title(ocr_result.blocks, image.height),
+            content=ocr_result.full_text,
+            publish_time=self._ocr_extractor.extract_time(ocr_result.blocks),
+            confidence=ocr_result.confidence,
+            extraction_method="ocr",
+        )
+        result.source_url = url
 
-            logger.info(
-                "vl_extraction_complete",
-                url=url,
-                title=result.title[:50] if result.title else None,
-                confidence=result.confidence,
-            )
-            return result
+        logger.info(
+            "ocr_extraction_done",
+            gpu_id=self._gpu_id,
+            confidence=result.confidence,
+            title=result.title[:50] if result.title else None,
+        )
+        return result
 
     async def run(self, url: str, screenshot_only: bool = False) -> Dict[str, Any]:
         """
@@ -227,50 +278,3 @@ class WebPagePipeline:
     def __del__(self):
         """Cleanup on deletion."""
         self._release_model()
-
-
-class BatchWebPipeline:
-    """
-    Batch processing pipeline for multiple URLs.
-
-    Example:
-        pipeline = BatchWebPipeline()
-        results = await pipeline.process_urls([
-            "https://example.com/1",
-            "https://example.com/2",
-        ])
-    """
-
-    def __init__(self):
-        self._pipeline = WebPagePipeline()
-        self._results = []
-
-    async def process_urls(self, urls: list) -> list:
-        """
-        Process multiple URLs.
-
-        Args:
-            urls: List of target URLs
-
-        Returns:
-            List of extraction results
-        """
-        logger.info("batch_processing_urls", count=len(urls))
-
-        results = []
-        for url in urls:
-            try:
-                result = await self._pipeline.extract_from_url(url)
-                results.append(result)
-            except Exception as e:
-                logger.error("url_processing_failed", url=url, error=str(e))
-                results.append(ExtractionResult(parse_error=str(e)))
-
-        return results
-
-    def process_urls_sync(self, urls: list) -> list:
-        """
-        Synchronous wrapper for batch processing.
-        """
-        import asyncio
-        return asyncio.run(self.process_urls(urls))

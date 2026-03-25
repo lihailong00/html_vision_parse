@@ -28,7 +28,7 @@ extraction:
   max_retries: 2
   # Extraction timeout in seconds
   timeout_seconds: 30
-  # Default extraction method: "vl", "ocr", or "hybrid"
+  # Default extraction method: "vl" or "ocr"
   extraction_method: "vl"
   # Per-field method override (leave empty to use extraction_method for all)
   # Example: {"title": "vl", "content": "ocr", "publish_time": "vl"}
@@ -80,3 +80,13 @@ batch:
   num_workers: 4
   # Prefetch factor for data loading
   prefetch_factor: 2
+
+# GPU configuration
+gpu:
+  # GPU device IDs to use, e.g. [0, 1, 2, 3]
+  # Empty list means auto-detect available GPUs
+  visible_devices: []
+  # Auto-detect GPUs on startup
+  auto_detect: true
+  # For vLLM tensor parallelism: how many GPUs per model instance
+  tensor_parallel_size: 1

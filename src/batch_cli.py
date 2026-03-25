@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -9,10 +10,9 @@ from typing import Optional, List, Dict, Any
 import argparse
 from loguru import logger
 
-from .pipeline import WebPagePipeline
+from .pipeline import WebPagePipeline, get_available_gpus
 from .html_renderer import HTMLRenderer
 from config.settings import settings
-
 
 
 
@@ -31,18 +31,49 @@ class BatchCLI:
         # Process URLs from input.jsonl
         python -m src.batch_cli --input input.jsonl --output results.jsonl
 
-        # Process HTML sources with custom fields
-        python -m src.batch_cli --input html_batch.jsonl --output results.jsonl --fields title,content --methods '{"title": "vl", "content": "ocr"}'
+        # Use specific GPU
+        python -m src.batch_cli --input input.jsonl --output results.jsonl --gpu-id 1
+
+        # Use OCR method (no VL model needed, faster)
+        python -m src.batch_cli --input input.jsonl --output results.jsonl --method ocr
+
+        # Per-field method selection
+        python -m src.batch_cli --input input.jsonl --output results.jsonl --fields title,content --methods '{"title": "vl", "content": "ocr"}'
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        gpu_id: int = None,
+        extraction_method: str = None,
+    ):
+        """
+        Initialize batch CLI.
+
+        Args:
+            gpu_id: GPU device ID to use. None = auto-select.
+            extraction_method: "vl" or "ocr". None = use settings default.
+        """
+        self._gpu_id = gpu_id
+        self._extraction_method = extraction_method or settings.extraction.extraction_method
         self._pipeline: Optional[WebPagePipeline] = None
         self._html_renderer: Optional[HTMLRenderer] = None
+
+        # Show GPU info
+        available = get_available_gpus()
+        if self._gpu_id is not None:
+            if self._gpu_id not in available:
+                logger.warning("gpu_id_not_in_available", gpu_id=self._gpu_id, available=available)
+            logger.info("using_specific_gpu", gpu_id=self._gpu_id, available_gpus=available)
+        else:
+            logger.info("auto_selecting_gpu", available_gpus=available, method=self._extraction_method)
 
     def _ensure_pipeline(self):
         """Ensure pipeline is initialized."""
         if self._pipeline is None:
-            self._pipeline = WebPagePipeline()
+            self._pipeline = WebPagePipeline(
+                gpu_id=self._gpu_id,
+                extraction_method=self._extraction_method,
+            )
         return self._pipeline
 
     def _ensure_html_renderer(self):
@@ -87,11 +118,19 @@ class BatchCLI:
             "failed": 0,
             "skipped": 0,
             "total_time_seconds": 0,
+            "gpu_id": self._gpu_id,
+            "extraction_method": self._extraction_method,
         }
 
         start_time = time.time()
 
-        logger.info("processing_jsonl", input=input_path, output=output_path, max_items=max_items)
+        logger.info("processing_jsonl",
+            input=input_path,
+            output=output_path,
+            max_items=max_items,
+            gpu_id=self._gpu_id,
+            method=self._extraction_method,
+        )
 
         with open(input_file, 'r', encoding='utf-8') as fin, \
              open(output_file, 'w', encoding='utf-8') as fout:
@@ -139,16 +178,18 @@ class BatchCLI:
                         # Render HTML to image
                         image = await renderer.render_from_html(html_content)
 
-                        # Extract using flexible extractor
-                        pipeline._ensure_model_loaded()
-
-                        if fields or methods:
-                            result = pipeline._flexible_extractor.extract_fields(
-                                image, fields=fields, methods=methods
-                            )
+                        # Extract
+                        if self._extraction_method == "ocr" and methods is None:
+                            result = pipeline._extract_with_ocr(image, url)
                         else:
-                            result = pipeline._extractor.extract(image)
-                            result.extraction_method = "vl"
+                            pipeline._ensure_model_loaded()
+                            if fields or methods:
+                                result = pipeline._flexible_extractor.extract_fields(
+                                    image, fields=fields, methods=methods
+                                )
+                            else:
+                                result = pipeline._extractor.extract(image)
+                                result.extraction_method = self._extraction_method
 
                         output_record = {
                             "url": url,
@@ -272,6 +313,20 @@ def parse_args():
         help="Maximum number of items to process"
     )
 
+    parser.add_argument(
+        "--gpu-id", "-g",
+        type=int,
+        default=None,
+        help="GPU device ID to use (default: auto-select)"
+    )
+
+    parser.add_argument(
+        "--method",
+        choices=["vl", "ocr"],
+        default=None,
+        help="Extraction method: vl (vision language) or ocr (default: from config)"
+    )
+
     return parser.parse_args()
 
 
@@ -293,8 +348,15 @@ def main():
             print(f"Error: Invalid methods JSON: {e}", file=sys.stderr)
             sys.exit(1)
 
+    # Show GPU info
+    available_gpus = get_available_gpus()
+    print(f"Available GPUs: {available_gpus}")
+
     # Run batch processing
-    cli = BatchCLI()
+    cli = BatchCLI(
+        gpu_id=args.gpu_id,
+        extraction_method=args.method,
+    )
 
     try:
         stats = cli.process_jsonl(
@@ -308,15 +370,17 @@ def main():
         print("\n" + "=" * 50)
         print("Batch Processing Complete")
         print("=" * 50)
-        print(f"Total:      {stats['total']}")
-        print(f"Success:    {stats['success']}")
-        print(f"Failed:     {stats['failed']}")
-        print(f"Skipped:    {stats['skipped']}")
-        print(f"Time:       {stats['total_time_seconds']:.1f}s")
+        print(f"Total:          {stats['total']}")
+        print(f"Success:        {stats['success']}")
+        print(f"Failed:         {stats['failed']}")
+        print(f"Skipped:        {stats['skipped']}")
+        print(f"Time:           {stats['total_time_seconds']:.1f}s")
+        print(f"GPU ID:         {stats['gpu_id']}")
+        print(f"Method:         {stats['extraction_method']}")
         if stats['total_time_seconds'] > 0:
             rate = stats['total'] / stats['total_time_seconds']
-            print(f"Rate:       {rate:.1f} items/sec")
-        print(f"Output:     {args.output}")
+            print(f"Rate:           {rate:.1f} items/sec")
+        print(f"Output:         {args.output}")
         print("=" * 50)
 
     except KeyboardInterrupt:

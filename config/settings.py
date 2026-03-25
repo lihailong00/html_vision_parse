@@ -34,9 +34,7 @@ class ExtractionConfig(BaseModel):
     max_retries: int = 2
     timeout_seconds: int = 30
     # Field extraction method: "vl" (vision language) or "ocr"
-    # Can be set globally or per-field
-    # Global default: "vl" or "ocr" or "hybrid"
-    extraction_method: Literal["vl", "ocr", "hybrid"] = "vl"
+    extraction_method: Literal["vl", "ocr"] = "vl"
     # Per-field method override: {"title": "vl", "content": "ocr", "publish_time": "vl"}
     # If not set, uses extraction_method as default
     field_methods: dict = {}
@@ -78,6 +76,17 @@ class BatchConfig(BaseModel):
     prefetch_factor: int = 2
 
 
+# GPU configuration
+class GPUConfig(BaseModel):
+    # GPU device IDs to use, e.g. [0, 1, 2, 3]
+    # Empty list means auto-detect available GPUs
+    visible_devices: list[int] = []
+    # Auto-detect GPUs on startup
+    auto_detect: bool = True
+    # For vLLM tensor parallelism: how many GPUs per model instance
+    tensor_parallel_size: int = 1
+
+
 # All configurations
 class Settings(BaseModel):
     model: ModelConfig = ModelConfig()
@@ -86,6 +95,7 @@ class Settings(BaseModel):
     api: APIConfig = APIConfig()
     batch: BatchConfig = BatchConfig()
     ocr: OCRConfig = OCRConfig()
+    gpu: GPUConfig = GPUConfig()
 
 
 # Global settings instance
