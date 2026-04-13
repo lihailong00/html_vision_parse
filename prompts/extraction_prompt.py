@@ -17,6 +17,7 @@ EXTRACTION_PROMPT = """你是一个专业的网页内容提取助手。请仔细
    - 标题：页面的主标题（H1或最大最醒目的文字）
    - 正文：主内容区域的可读文本，去除所有噪音内容
    - 发布时间：主内容附近的日期（格式化为 YYYY-MM-DD HH:mm）
+   - 语言类型：根据页面内容判断语言（如en, zh, ja, ko等）
 
 ## 重要规则
 
@@ -33,13 +34,12 @@ EXTRACTION_PROMPT = """你是一个专业的网页内容提取助手。请仔细
   "title": "页面标题",
   "content": "正文内容摘要或完整内容...",
   "publish_time": "2026-03-23 14:30",
-  "confidence": 0.95,
-  "regions_ignored": ["侧边栏-推荐列表", "顶部导航", "右下角广告"]
+  "lang_type": "en"
 }
 
-confidence: 你对这次提取的自信程度（0.0-1.0）
-regions_ignored: 你忽略的区域列表
+lang_type: 页面主语言代码，如 en, zh, ja, ko, fr, de 等
 """
+
 
 # Layout detection prompt - identifies different regions in the page
 LAYOUT_DETECTION_PROMPT = """分析这张网页截图，标记出页面的不同区域。
@@ -68,6 +68,7 @@ VALIDATION_PROMPT = """请验证以下提取结果是否正确：
 标题：{title}
 正文（前100字）：{content_preview}...
 发布时间：{publish_time}
+语言：{lang_type}
 
 如果发现错误请指出，并给出修正后的结果。如果正确，回复"确认正确"。
 """
@@ -83,10 +84,11 @@ def get_layout_detection_prompt() -> str:
     return LAYOUT_DETECTION_PROMPT
 
 
-def get_validation_prompt(title: str, content: str, publish_time: str) -> str:
+def get_validation_prompt(title: str, content: str, publish_time: str, lang_type: str) -> str:
     """Returns the validation prompt with filled data."""
     return VALIDATION_PROMPT.format(
         title=title,
         content_preview=content[:100] if content else "",
-        publish_time=publish_time or "未找到"
+        publish_time=publish_time or "未找到",
+        lang_type=lang_type or "未找到"
     )

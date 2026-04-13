@@ -28,11 +28,6 @@ extraction:
   max_retries: 2
   # Extraction timeout in seconds
   timeout_seconds: 30
-  # Default extraction method: "vl" or "ocr"
-  extraction_method: "vl"
-  # Per-field method override (leave empty to use extraction_method for all)
-  # Example: {"title": "vl", "content": "ocr", "publish_time": "vl"}
-  field_methods: {}
 
 browser:
   # Browser type: "chromium", "firefox", or "webkit"
@@ -60,18 +55,6 @@ api:
   workers: 1
   # Max concurrent requests
   max_concurrent_requests: 10
-
-ocr:
-  # Enable OCR extraction
-  enabled: true
-  # Minimum confidence for OCR (fallback to VL below this)
-  min_confidence: 0.75
-  # Use EasyOCR (true) vs PaddleOCR (false)
-  use_easyocr: true
-  # Fallback to VL when OCR confidence is low
-  fallback_to_vl: true
-  # OCR timeout in seconds
-  ocr_timeout_seconds: 10
 
 batch:
   # Batch size for processing

@@ -12,18 +12,34 @@
 
 ## 快速开始
 
+### 环境要求
+
+- Python 3.10+
+- NVIDIA 显卡 (CUDA 11.8+ 或 12.1+)
+- 已安装匹配 CUDA 版本的 PyTorch
+
 ### 安装依赖
 
 ```bash
 # 激活虚拟环境
 source .venv/bin/activate
 
-# 安装依赖
+# 安装依赖（不会强制升级已有依赖）
 uv pip install -e ".[playwright]"
 
 # 安装浏览器
 playwright install chromium
 ```
+
+### 依赖版本策略
+
+本包**不会自动升级**已安装的依赖：
+- 如果机器上的 `torch` 或 `transformers` 版本过低，安装会**终止并提示**
+- 如需手动处理，请先升级环境再安装：
+  ```bash
+  pip install torch>=2.2.0 transformers>=4.40.0
+  pip install html_vision_parse-xxx.whl --no-deps
+  ```
 
 ### 配置文件
 
