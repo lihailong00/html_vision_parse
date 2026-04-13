@@ -1,52 +1,35 @@
 # HTML Vision Parse
 
-使用视觉语言模型从网页截图中提取结构化内容（标题、内容、发布时间）。
+使用 Playwright 截图 + 大模型 API 提取网页结构化内容。
 
 ## 功能特性
 
-- **双模式支持**: HTTP API 接口 / Python CLI 批处理
-- **灵活的提取方式**: 支持按字段选择 OCR 或 VL 模型提取
-- **混合提取**: OCR + VL 模型置信度自适应切换
-- **多模型支持**: Qwen3-VL-2B / InternVL3-1B
-- **HTML文件支持**: 直接上传 HTML 文件进行提取
+- **截图提取**: Playwright 获取网页截图
+- **外部 LLM API**: 支持 Claude / GPT-4o / Gemini
+- **输入灵活**: 支持 URL 或 HTML 源码
+- **6字段输出**: title, content, publish_time, lang_type, country, city
 
 ## 快速开始
 
 ### 环境要求
 
 - Python 3.10+
-- NVIDIA 显卡 (CUDA 11.8+ 或 12.1+)
-- 已安装匹配 CUDA 版本的 PyTorch
+- API Key (ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)
 
 ### 安装依赖
 
 ```bash
-# 激活虚拟环境
 source .venv/bin/activate
-
-# 安装依赖（不会强制升级已有依赖）
 uv pip install -e ".[playwright]"
-
-# 安装浏览器
 playwright install chromium
 ```
 
-### 依赖版本策略
+### 配置
 
-本包**不会自动升级**已安装的依赖：
-- 如果机器上的 `torch` 或 `transformers` 版本过低，安装会**终止并提示**
-- 如需手动处理，请先升级环境再安装：
-  ```bash
-  pip install torch>=2.2.0 transformers>=4.40.0
-  pip install html_vision_parse-xxx.whl --no-deps
-  ```
-
-### 配置文件
-
-复制示例配置并修改：
+设置环境变量或直接修改 `config/settings.py`：
 
 ```bash
-cp config.yaml.example config.yaml
+export ANTHROPIC_API_KEY="sk-..."
 ```
 
 ## 使用方式
@@ -56,15 +39,15 @@ cp config.yaml.example config.yaml
 启动服务：
 
 ```bash
-python -m src.api
+uvicorn src.api:app --host 0.0.0.0 --port 18765
 ```
 
-服务地址：`http://localhost:8000`
+服务地址：`http://localhost:18765`
 
-#### 1.1 从 URL 提取
+#### 从 URL 提取
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/extract \
+curl -X POST http://localhost:18765/extract \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com/article"}'
 ```
@@ -73,126 +56,68 @@ curl -X POST http://localhost:8000/api/v1/extract \
 
 ```json
 {
-  "success": true,
   "title": "文章标题",
   "content": "文章内容...",
   "publish_time": "2024-03-15",
-  "confidence": 0.95,
-  "extraction_method": "vl",
-  "processing_time_ms": 2500
+  "lang_type": "zh",
+  "country": null,
+  "city": null
 }
 ```
 
-#### 1.2 指定提取字段和方法
+#### 从 HTML 提取
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/extract \
+curl -X POST http://localhost:18765/extract \
   -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://example.com/article",
-    "fields": ["title", "content"],
-    "methods": {"title": "vl", "content": "ocr"}
-  }'
+  -d '{"html_source": "<html><body><h1>Hello</h1></body></html>"}'
 ```
 
-#### 1.3 从 HTML 文件提取
+### 2. Python 直接调用
 
-```bash
-curl -X POST http://localhost:8000/api/v1/extract/html \
-  -F "file=@page.html" \
-  -F "fields=title,content"
-```
+```python
+from src.simple_pipeline import SimplePipeline
 
-#### 1.4 批量处理 URL
-
-```bash
-curl -X POST http://localhost:8000/api/v1/batch \
-  -H "Content-Type: application/json" \
-  -d '["https://example.com/1", "https://example.com/2"]'
-```
-
-### 2. Python CLI 批处理
-
-#### 输入文件格式 (JSONL)
-
-```jsonl
-{"url": "https://example.com/article1"}
-{"url": "https://example.com/article2"}
-{"html_source": "<html><body><h1>Hello</h1></body></html>", "url": "local-page"}
-```
-
-#### 运行批处理
-
-```bash
-python -m src.batch_cli -i input.jsonl -o output.jsonl
-```
-
-#### 指定提取字段
-
-```bash
-python -m src.batch_cli -i input.jsonl -o output.jsonl --fields title,publish_time
-```
-
-#### 指定提取方法
-
-```bash
-python -m src.batch_cli -i input.jsonl -o output.jsonl \
-  --methods '{"title": "vl", "content": "ocr", "publish_time": "vl"}'
-```
-
-#### 限制处理数量
-
-```bash
-python -m src.batch_cli -i input.jsonl -o output.jsonl --max-items 100
+pipeline = SimplePipeline(api_provider="claude")
+result = pipeline.extract_from_url("https://example.com/article")
+print(result.title, result.content, result.lang_type)
 ```
 
 ## 配置说明
 
-### 配置文件 (config.yaml)
+### config/settings.py
 
-```yaml
-model:
-  model_type: "qwen3_vl"        # 或 "internvl3"
-  name: "/path/to/model"
-  inference_framework: "transformers"  # 或 "vllm"
+```python
+class BrowserConfig:
+    headless: bool = True
+    viewport_width: int = 1920
+    viewport_height: int = 1080
+    full_page: bool = True
+    wait_until: str = "networkidle"
+    wait_timeout: int = 30000
 
-extraction:
-  extraction_method: "vl"       # "vl", "ocr", "hybrid"
-  field_methods: {}             # 按字段指定方法
-
-ocr:
-  enabled: true
-  min_confidence: 0.75
-
-browser:
-  headless: true
-  viewport_width: 1920
-  viewport_height: 1080
+class APIConfig:
+    host: str = "0.0.0.0"
+    port: int = 18765
+    provider: str = "claude"  # "claude", "gpt", "gemini"
+    api_key: str = ""         # 从环境变量读取
+    model: str = ""           # 提供商默认模型
 ```
 
 ### 环境变量
 
 | 环境变量 | 说明 | 默认值 |
 |---------|------|--------|
-| `MODEL_NAME` | 模型路径 | - |
-| `EXTRACTION_METHOD` | 提取方法 | vl |
-| `OCR_ENABLED` | 启用OCR | true |
-| `API_PORT` | API端口 | 8000 |
-
-### 提取方法说明
-
-| 方法 | 说明 | 适用场景 |
-|------|------|----------|
-| `vl` | 视觉语言模型 | 标题、时间等语义理解任务 |
-| `ocr` | 文字识别 | 纯文本内容提取，速度快 |
-| `hybrid` | 混合模式 | OCR优先，低置信度时切换VL |
+| `ANTHROPIC_API_KEY` | Anthropic API Key | - |
+| `OPENAI_API_KEY` | OpenAI API Key | - |
+| `GOOGLE_API_KEY` | Google API Key | - |
 
 ## API 文档
 
 启动服务后访问：
 
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: http://localhost:18765/docs
+- ReDoc: http://localhost:18765/redoc
 
 ## 项目结构
 
@@ -200,35 +125,25 @@ browser:
 html_vision_parse/
 ├── src/
 │   ├── api.py              # FastAPI 服务
-│   ├── pipeline.py         # 提取流程
-│   ├── html_renderer.py    # HTML 渲染
-│   ├── batch_cli.py        # 批处理 CLI
-│   ├── config_loader.py    # 配置加载
-│   ├── flexible_extractor.py # 灵活提取
-│   ├── inference.py        # 模型推理
-│   ├── extractor.py        # 内容提取
-│   └── browser.py         # 浏览器控制
+│   ├── api_client.py       # LLM API 客户端
+│   ├── simple_pipeline.py  # 核心提取流水线
+│   ├── browser.py          # Playwright 浏览器
+│   └── screenshot.py       # 截图功能
 ├── config/
-│   └── settings.py        # 配置定义
-├── config.yaml.example    # 配置示例
-└── docs/                  # 文档目录
+│   └── settings.py         # 配置
+├── prompts/
+│   └── extraction_prompt.py # 提取提示词
+└── tests/
+    └── test_simple_pipeline.py
 ```
 
-## 性能参考
+## 输出字段说明
 
-| 模型 | 参数量 | 推理时间 |
-|------|--------|---------|
-| Qwen3-VL-2B | 2B | ~3s/图 |
-| InternVL3-1B | 1B | ~2.2s/图 |
-| EasyOCR | - | ~2s/图 |
-
-## 常见问题
-
-### Q: 如何选择模型？
-A: InternVL3-1B 速度更快，适合大规模处理；Qwen3-VL-2B 精度更高。
-
-### Q: OCR 和 VL 哪个更好？
-A: 标题和时间推荐用 VL（语义理解强），正文内容推荐 OCR（速度快）。
-
-### Q: 如何提高提取精度？
-A: 启用混合模式 `extraction_method: "hybrid"`，低置信度时自动切换到 VL。
+| 字段 | 来源 | 说明 |
+|------|------|------|
+| title | 视觉 | 页面标题 |
+| content | 视觉 | 正文内容 |
+| publish_time | 视觉 | 发布时间 |
+| lang_type | 视觉+URL | 语言代码 (en, zh, ja...) |
+| country | URL TLD | 国家代码 (.cn→CN, .jp→JP) |
+| city | URL | 城市 (如 beijing.xxx.com) |
