@@ -1,34 +1,6 @@
 # HTML Vision Parse Configuration
 # Copy to config.yaml and modify as needed
 
-model:
-  # Model type: "qwen3_vl" or "internvl3"
-  model_type: "qwen3_vl"
-  # Model path
-  name: "/home/longcoding/dev/models/Qwen3-VL-2B-Instruct"
-  # Device: "cuda" or "cpu"
-  device: "cuda"
-  # Data type: "bfloat16", "float16", "float32"
-  dtype: "bfloat16"
-  # Max batch size for inference
-  max_batch_size: 4
-  # Quantization: "none", "int8", "int4"
-  quantization: "int4"
-  # Inference framework: "transformers" or "vllm"
-  inference_framework: "transformers"
-  # InternVL model path (used when model_type is "internvl3")
-  internvl_model_path: "/home/longcoding/dev/models/InternVL3-1B"
-
-extraction:
-  # Minimum confidence threshold for extraction
-  min_confidence: 0.85
-  # Enable cross-validation between methods
-  enable_cross_validation: false
-  # Max retries on failure
-  max_retries: 2
-  # Extraction timeout in seconds
-  timeout_seconds: 30
-
 browser:
   # Browser type: "chromium", "firefox", or "webkit"
   type: "chromium"
@@ -50,26 +22,10 @@ api:
   # API server host
   host: "0.0.0.0"
   # API server port
-  port: 8000
-  # Number of uvicorn workers
-  workers: 1
-  # Max concurrent requests
-  max_concurrent_requests: 10
-
-batch:
-  # Batch size for processing
-  batch_size: 4
-  # Number of worker processes
-  num_workers: 4
-  # Prefetch factor for data loading
-  prefetch_factor: 2
-
-# GPU configuration
-gpu:
-  # GPU device IDs to use, e.g. [0, 1, 2, 3]
-  # Empty list means auto-detect available GPUs
-  visible_devices: []
-  # Auto-detect GPUs on startup
-  auto_detect: true
-  # For vLLM tensor parallelism: how many GPUs per model instance
-  tensor_parallel_size: 1
+  port: 18765
+  # LLM provider: "claude", "gpt", "gemini"
+  provider: "claude"
+  # API key (leave empty to use environment variable)
+  api_key: ""
+  # Model name (leave empty to use provider default)
+  model: ""
