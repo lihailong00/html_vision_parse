@@ -24,6 +24,8 @@ class BrowserConfig(BaseModel):
 
 # API configuration
 class APIConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 18765
     provider: str = "claude"  # "claude", "gpt", "gemini"
     api_key: str = ""         # from environment if empty
     model: str = ""           # provider-specific default
